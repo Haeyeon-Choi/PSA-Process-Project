@@ -11,17 +11,15 @@ def css_constraint_residuals(
     evaluation: CycleEvaluation,
     purity_min: float,
     recovery_min: float,
-) -> Tuple[float, float]:
-    """Return inequality residuals g(x) <= 0 for purity/recovery constraints."""
-    return purity_min - evaluation.purity, recovery_min - evaluation.recovery
+) -> Tuple[float, float, float]:
+    """Return inequality residuals g(x) <= 0 for purity/recovery/CSS constraints."""
+    return (
+        purity_min - evaluation.purity,
+        recovery_min - evaluation.recovery,
+        evaluation.css_error,
+    )
 
 
 def pressure_ordering_residuals(point: Dict[str, float]) -> Tuple[float, float]:
-    """Return residuals for process-pressure ordering constraints.
-
-    Constraints are written as g(x) <= 0:
-    - PI <= P0  ->  PI - P0 <= 0
-    - Pl <= PI  ->  Pl - PI <= 0
-    """
-
+    """Return residuals for process-pressure ordering constraints."""
     return point["PI"] - point["P0"], point["Pl"] - point["PI"]

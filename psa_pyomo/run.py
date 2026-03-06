@@ -15,14 +15,19 @@ from psa_pyomo.process.cycle_model import CycleConfig, CycleSimulator
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Direct PSA optimization with Pyomo trust-region LP steps.")
     parser.add_argument("--solver", default="glpk")
+    parser.add_argument("--backend", choices=["python", "julia"], default="python")
     parser.add_argument("--mat-index", type=int, default=16)
     parser.add_argument("--N", type=int, default=5)
     parser.add_argument("--purity-min", type=float, default=0.90)
     parser.add_argument("--recovery-min", type=float, default=0.75)
-    parser.add_argument("--energy-weight", type=float, default=0.01)
+    parser.add_argument("--css-tol", type=float, default=1e-4)
+    parser.add_argument("--energy-weight", type=float, default=0.0)
     parser.add_argument("--max-iter", type=int, default=20)
     parser.add_argument("--fd-rel-step", type=float, default=1e-3)
     parser.add_argument("--delta0", type=float, default=0.25)
+    parser.add_argument("--css-max-iter", type=int, default=30)
+    parser.add_argument("--iter-log-path", default="logs/optimization_iterations.csv")
+    parser.add_argument("--cache-path", default=".psa_pyomo_cache.jsonl")
 
     parser.add_argument("--L", type=float, default=1.0)
     parser.add_argument("--P0", type=float, default=3.5e5)
@@ -86,14 +91,24 @@ def main() -> None:
     optimization_config = OptimizationConfig(
         purity_min=args.purity_min,
         recovery_min=args.recovery_min,
+        css_tol=args.css_tol,
         energy_weight=args.energy_weight,
         fd_rel_step=args.fd_rel_step,
         delta0=args.delta0,
         max_iter=args.max_iter,
         solver_name=args.solver,
+        iter_log_path=args.iter_log_path,
     )
 
-    simulator = CycleSimulator(Path(__file__).resolve().parents[1], CycleConfig(args.mat_index, args.N))
+    cycle_config = CycleConfig(
+        material_index=args.mat_index,
+        n_grid=args.N,
+        backend=args.backend,
+        css_max_iter=args.css_max_iter,
+        css_tol=args.css_tol,
+        cache_path=args.cache_path,
+    )
+    simulator = CycleSimulator(Path(__file__).resolve().parents[1], cycle_config)
 
     best_point, best_eval = run_optimization(simulator, decision_space, optimization_config)
 
@@ -104,6 +119,7 @@ def main() -> None:
     print(f"energy       = {best_eval.energy:.6g}")
     print(f"purity       = {best_eval.purity:.6g}")
     print(f"recovery     = {best_eval.recovery:.6g}")
+    print(f"css_error    = {best_eval.css_error:.3e}")
     print(f"objective    = {objective_value(best_eval, optimization_config.energy_weight):.6g}")
 
 
