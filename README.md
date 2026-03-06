@@ -52,9 +52,9 @@ psa_pyomo
 ### Core equations
 
 Objective (default behavior: maximize productivity):
-$$
+$
 \max\; J(x)=productivity(x)-w\cdot energy(x)
-$$
+$
 (`w=0` by default.)
 
 Constraints:
