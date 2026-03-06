@@ -48,6 +48,12 @@ def _log_iteration(config: OptimizationConfig, iteration: int, delta: float, eva
     with path.open("a", encoding="utf-8") as fp:
         fp.write(line)
 
+
+
+def objective_value(evaluation: CycleEvaluation, energy_weight: float) -> float:
+    return productivity_value(evaluation) - energy_weight * evaluation.energy
+
+
 def finite_difference_gradients(
     simulator: CycleSimulator,
     decision_space: ColumnDecisionSpace,
