@@ -180,7 +180,6 @@ $$
 ```bash
 pip install pyomo
 ```
-
 Install a Pyomo-supported LP solver (for example `glpk`).
 
 If you use `--backend julia`, install Julia and project dependencies as well.

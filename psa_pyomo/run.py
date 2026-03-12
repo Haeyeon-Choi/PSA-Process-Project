@@ -8,7 +8,6 @@ from pathlib import Path
 from psa_pyomo.model.column_model import ColumnDecisionSpace, VARIABLE_ORDER
 from psa_pyomo.model.isotherm import IsothermParameters
 from psa_pyomo.model.kinetics import KineticsParameters
-from psa_pyomo.optimization.optimize_psa import OptimizationConfig, objective_value, run_optimization
 from psa_pyomo.process.cycle_model import CycleConfig, CycleSimulator
 
 
@@ -28,6 +27,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--css-max-iter", type=int, default=30)
     parser.add_argument("--iter-log-path", default="logs/optimization_iterations.csv")
     parser.add_argument("--cache-path", default=".psa_pyomo_cache.jsonl")
+    parser.add_argument("--infeasibility-penalty", type=float, default=1e6)
 
     parser.add_argument("--L", type=float, default=1.0)
     parser.add_argument("--P0", type=float, default=3.5e5)
@@ -60,6 +60,8 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
+
+    from psa_pyomo.optimization.optimize_psa import OptimizationConfig, objective_value, run_optimization
 
     _ = IsothermParameters(material_index=args.mat_index)
     _ = KineticsParameters(n_grid=args.N)
@@ -98,6 +100,7 @@ def main() -> None:
         max_iter=args.max_iter,
         solver_name=args.solver,
         iter_log_path=args.iter_log_path,
+        infeasibility_penalty=args.infeasibility_penalty,
     )
 
     cycle_config = CycleConfig(

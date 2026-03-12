@@ -25,6 +25,7 @@ class OptimizationConfig:
     max_iter: int
     solver_name: str
     iter_log_path: str | None = None
+    infeasibility_penalty: float = 1e6
 
 
 def objective_value(evaluation: CycleEvaluation, energy_weight: float) -> float:
@@ -47,12 +48,6 @@ def _log_iteration(config: OptimizationConfig, iteration: int, delta: float, eva
     )
     with path.open("a", encoding="utf-8") as fp:
         fp.write(line)
-
-
-
-def objective_value(evaluation: CycleEvaluation, energy_weight: float) -> float:
-    return productivity_value(evaluation) - energy_weight * evaluation.energy
-
 
 def finite_difference_gradients(
     simulator: CycleSimulator,
@@ -140,22 +135,46 @@ def solve_trust_region_lp(
     m.step_neg = pyo.Constraint(m.V, rule=lambda model, v: current_point[v] - model.x[v] <= model.t[v])
     m.trust_region = pyo.Constraint(expr=sum(m.t[v] for v in m.V) <= delta)
 
-    m.lin_g1 = pyo.Constraint(expr=base_g1 + sum(grad_cons["g1"][v] * (m.x[v] - current_point[v]) for v in m.V) <= 0.0)
-    m.lin_g2 = pyo.Constraint(expr=base_g2 + sum(grad_cons["g2"][v] * (m.x[v] - current_point[v]) for v in m.V) <= 0.0)
-    m.lin_css = pyo.Constraint(expr=base_g3 + sum(grad_cons["g3"][v] * (m.x[v] - current_point[v]) for v in m.V) <= config.css_tol)
+    # Soft-constraint slacks improve robustness when local linearization becomes temporarily infeasible.
+    m.s_purity = pyo.Var(domain=pyo.NonNegativeReals)
+    m.s_recovery = pyo.Var(domain=pyo.NonNegativeReals)
+    m.s_css = pyo.Var(domain=pyo.NonNegativeReals)
+    m.s_pi_p0 = pyo.Var(domain=pyo.NonNegativeReals)
+    m.s_pl_pi = pyo.Var(domain=pyo.NonNegativeReals)
 
-    m.pressure_pi_p0 = pyo.Constraint(expr=m.x["PI"] - m.x["P0"] <= 0.0)
-    m.pressure_pl_pi = pyo.Constraint(expr=m.x["Pl"] - m.x["PI"] <= 0.0)
+    m.lin_g1 = pyo.Constraint(
+        expr=base_g1 + sum(grad_cons["g1"][v] * (m.x[v] - current_point[v]) for v in m.V) <= m.s_purity
+    )
+    m.lin_g2 = pyo.Constraint(
+        expr=base_g2 + sum(grad_cons["g2"][v] * (m.x[v] - current_point[v]) for v in m.V) <= m.s_recovery
+    )
+    m.lin_css = pyo.Constraint(
+        expr=base_g3 + sum(grad_cons["g3"][v] * (m.x[v] - current_point[v]) for v in m.V) <= config.css_tol + m.s_css
+    )
 
-    m.obj = pyo.Objective(expr=base_obj + sum(grad_obj[v] * (m.x[v] - current_point[v]) for v in m.V), sense=pyo.maximize)
+    m.pressure_pi_p0 = pyo.Constraint(expr=m.x["PI"] - m.x["P0"] <= m.s_pi_p0)
+    m.pressure_pl_pi = pyo.Constraint(expr=m.x["Pl"] - m.x["PI"] <= m.s_pl_pi)
+
+    linear_obj = base_obj + sum(grad_obj[v] * (m.x[v] - current_point[v]) for v in m.V)
+    slack_penalty = config.infeasibility_penalty * (
+        m.s_purity + m.s_recovery + m.s_css + m.s_pi_p0 + m.s_pl_pi
+    )
+    m.obj = pyo.Objective(expr=linear_obj - slack_penalty, sense=pyo.maximize)
 
     solver = pyo.SolverFactory(config.solver_name)
     if solver is None or not solver.available(False):
         raise RuntimeError(f"Solver '{config.solver_name}' is not available.")
 
     result = solver.solve(m, tee=False)
-    if result.solver.termination_condition not in {pyo.TerminationCondition.optimal, pyo.TerminationCondition.feasible}:
-        raise RuntimeError(f"LP subproblem failed: {result.solver.termination_condition}")
+    term = result.solver.termination_condition
+    acceptable = {
+        pyo.TerminationCondition.optimal,
+        pyo.TerminationCondition.feasible,
+        pyo.TerminationCondition.locallyOptimal,
+    }
+    if term not in acceptable:
+        # Fall back to the current point if local model fails.
+        return dict(current_point)
 
     return {v: float(pyo.value(m.x[v])) for v in VARIABLE_ORDER}
 
