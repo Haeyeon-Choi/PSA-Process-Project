@@ -184,18 +184,6 @@ Install a Pyomo-supported LP solver (for example `glpk`).
 
 If you use `--backend julia`, install Julia and project dependencies as well.
 
-#### Python
-
-```bash
-pip install pyomo
-```
-
-(Use any LP solver supported by Pyomo, for example `glpk`.)
-
-#### Julia
-
-You need Julia with this project environment and `PSASimulator` available.
-
 ---
 
 ### Run example
@@ -210,27 +198,4 @@ python -m psa_pyomo.run \
   --energy-weight 0.0 \
   --cache-path .psa_pyomo_cache.jsonl \
   --iter-log-path logs/optimization_iterations.csv
-```
-
-```bash
-python -m psa_pyomo.run \
-  --solver glpk \
-  --mat-index 16 \
-  --N 5 \
-  --purity-min 0.90 \
-  --recovery-min 0.75 \
-  --energy-weight 0.01 \
-  --P_0 3.5e5 \
-  --ndot 1.0 \
-  --tads 300 \
-  --alpha 0.25 \
-  --beta 0.25 \
-  --P_I 1e5 \
-  --P_l 1e4
-```
-
-Compatibility entry-point:
-
-```bash
-python pyomo_psa_optimization.py --solver glpk
 ```

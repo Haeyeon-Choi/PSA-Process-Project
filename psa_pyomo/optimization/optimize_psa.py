@@ -33,6 +33,26 @@ def objective_value(evaluation: CycleEvaluation, energy_weight: float) -> float:
     return productivity_value(evaluation) - energy_weight * evaluation.energy
 
 
+def _residuals(
+    evaluation: CycleEvaluation,
+    point: Dict[str, float],
+    config: OptimizationConfig,
+) -> Dict[str, float]:
+    g1, g2, g3 = css_constraint_residuals(evaluation, config.purity_min, config.recovery_min)
+    g_pi_p0, g_pl_pi = pressure_ordering_residuals(point)
+    return {
+        "purity": g1,
+        "recovery": g2,
+        "css": g3 - config.css_tol,
+        "pi_le_p0": g_pi_p0,
+        "pl_le_pi": g_pl_pi,
+    }
+
+
+def _is_feasible(res: Dict[str, float]) -> bool:
+    return all(v <= 0.0 for v in res.values())
+
+
 
 def _log_iteration(config: OptimizationConfig, iteration: int, delta: float, evaluation: CycleEvaluation, accepted: bool) -> None:
     if not config.iter_log_path:
@@ -186,7 +206,14 @@ def run_optimization(
 ) -> Tuple[Dict[str, float], CycleEvaluation]:
     current_point = dict(decision_space.initial_point)
     current_eval = simulator.evaluate(current_point)
-    best_point, best_eval = dict(current_point), current_eval
+
+    current_res = _residuals(current_eval, current_point, config)
+    if _is_feasible(current_res):
+        best_point: Dict[str, float] | None = dict(current_point)
+        best_eval: CycleEvaluation | None = current_eval
+    else:
+        best_point = None
+        best_eval = None
 
     delta = config.delta0
     for iteration in range(1, config.max_iter + 1):
@@ -196,22 +223,13 @@ def run_optimization(
 
         candidate_obj = objective_value(candidate_eval, config.energy_weight)
         current_obj = objective_value(current_eval, config.energy_weight)
-        g1, g2, g3 = css_constraint_residuals(candidate_eval, config.purity_min, config.recovery_min)
-        g_pi_p0, g_pl_pi = pressure_ordering_residuals(candidate)
-
-        improved = (
-            (g1 <= 0.0)
-            and (g2 <= 0.0)
-            and (g3 <= config.css_tol)
-            and (g_pi_p0 <= 0.0)
-            and (g_pl_pi <= 0.0)
-            and (candidate_obj >= current_obj)
-        )
+        cand_res = _residuals(candidate_eval, candidate, config)
+        improved = _is_feasible(cand_res) and (candidate_obj >= current_obj)
 
         if improved:
             current_point, current_eval = candidate, candidate_eval
             delta = min(delta * 1.4, 2.0)
-            if candidate_obj > objective_value(best_eval, config.energy_weight):
+            if (best_eval is None) or (candidate_obj > objective_value(best_eval, config.energy_weight)):
                 best_point, best_eval = dict(candidate), candidate_eval
         else:
             delta = max(delta * 0.5, 1e-3)
@@ -225,5 +243,14 @@ def run_optimization(
         )
         if delta <= 1e-3:
             break
+
+    if best_point is None or best_eval is None:
+        final_res = _residuals(current_eval, current_point, config)
+        detail = ", ".join(f"{k}={v:.3e}" for k, v in final_res.items())
+        raise RuntimeError(
+            "No feasible point found for the requested constraints. "
+            f"Final residuals: {detail}. "
+            "Try relaxing purity/recovery/CSS targets or changing initial point and bounds."
+        )
 
     return best_point, best_eval
