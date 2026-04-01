@@ -9,7 +9,6 @@ from typing import Dict, Tuple
 import pyomo.environ as pyo
 
 from psa_pyomo.model.column_model import ColumnDecisionSpace, VARIABLE_ORDER
-from psa_pyomo.performance.productivity import productivity_value
 from psa_pyomo.process.css_constraints import css_constraint_residuals, pressure_ordering_residuals
 from psa_pyomo.process.cycle_model import CycleEvaluation, CycleSimulator
 from psa_pyomo.run import SCALE
@@ -30,7 +29,7 @@ class OptimizationConfig:
 
 def objective_value(evaluation: CycleEvaluation, energy_weight: float) -> float:
     """Primary objective: maximize productivity (optional energy penalty)."""
-    return productivity_value(evaluation) - energy_weight * evaluation.energy
+    return evaluation.productivity - energy_weight * evaluation.energy
 
 
 def _residuals(
