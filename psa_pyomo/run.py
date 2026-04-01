@@ -6,11 +6,8 @@ import argparse
 from pathlib import Path
 
 from psa_pyomo.model.column_model import ColumnDecisionSpace, VARIABLE_ORDER
-from psa_pyomo.model.isotherm import IsothermParameters
-from psa_pyomo.model.kinetics import KineticsParameters
 from psa_pyomo.process.cycle_model import CycleConfig, CycleSimulator
 import random
-# from pyDOE2 import lhsc
 
 SCALE = {
     "L": 1.0,
@@ -26,7 +23,6 @@ SCALE = {
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Direct PSA optimization with Pyomo trust-region LP steps.")
     parser.add_argument("--solver", default="glpk")
-    parser.add_argument("--backend", choices=["python", "julia"], default="python")
     parser.add_argument("--mat-index", type=int, default=16)
     parser.add_argument("--N", type=int, default=5)
     parser.add_argument("--purity-min", type=float, default=0.90)
@@ -36,7 +32,6 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--max-iter", type=int, default=20)
     parser.add_argument("--fd-rel-step", type=float, default=1e-3)
     parser.add_argument("--delta0", type=float, default=0.25)
-    parser.add_argument("--css-max-iter", type=int, default=30)
     parser.add_argument("--iter-log-path", default="logs/optimization_iterations.csv")
     parser.add_argument("--cache-path", default=".psa_pyomo_cache.jsonl")
     parser.add_argument("--infeasibility-penalty", type=float, default=1e6)
@@ -75,11 +70,6 @@ def main() -> None:
 
     from psa_pyomo.optimization.optimize_psa import OptimizationConfig, objective_value, run_optimization
 
-    _ = IsothermParameters(material_index=args.mat_index)
-    _ = KineticsParameters(n_grid=args.N)
-
-    scale_P = 1e5
-
     bounds = {
     k: (args.__dict__[f"{k}_lb"] / SCALE[k],
         args.__dict__[f"{k}_ub"] / SCALE[k])
@@ -110,8 +100,6 @@ def main() -> None:
     cycle_config = CycleConfig(
         material_index=args.mat_index,
         n_grid=args.N,
-        backend=args.backend,
-        css_max_iter=args.css_max_iter,
         css_tol=args.css_tol,
         cache_path=args.cache_path,
     )
