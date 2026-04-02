@@ -1,5 +1,6 @@
 using Pkg
-Pkg.activate(".")
+# Activate the project root (parent of scripts/)
+Pkg.activate(joinpath(@__DIR__, ".."))
 
 using PSASimulator
 
