@@ -26,6 +26,7 @@ class CycleConfig:
     n_grid: int
     css_tol: float = 1e-4
     cache_path: str = ".psa_pyomo_cache.jsonl"
+    feed_y0: float = 0.15
 
 
 class CycleSimulator:
@@ -91,6 +92,7 @@ class CycleSimulator:
             str(self.config.n_grid),
             *(str(point[name]) for name in VARIABLE_ORDER),
             "false",
+            str(self.config.feed_y0),
         ]
         proc = subprocess.run(cmd, cwd=self.project_dir, capture_output=True, text=True, check=False)
         if proc.returncode != 0:

@@ -1478,9 +1478,7 @@ weakdeps = ["StatsBase"]
 
 [[deps.PSASimulator]]
 deps = ["DataFrames", "DifferentialEquations", "LinearAlgebra", "OrdinaryDiffEq", "PrettyTables", "SparseArrays", "Statistics"]
-git-tree-sha1 = "10451db554ca4c02d4fb0b99620232826522ace9"
-repo-rev = "main"
-repo-url = "https://github.com/xyin-anl/PSASimulator.jl"
+path = "PSASimulator_local"
 uuid = "eab7f6fe-1ad6-4d68-9f3e-0f59499d4d38"
 version = "0.0.1"
 
