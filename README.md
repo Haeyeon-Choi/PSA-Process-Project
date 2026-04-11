@@ -1,201 +1,149 @@
-### Acknowledgment
+# PSA Process Optimization
 
-This project is based on the [original PSASimulator framework](https://github.com/xyin-anl/PSASimulator.jl).
+Pressure Swing Adsorption (PSA) optimization framework for CO2/N2 separation. Combines Julia-based PSA simulation ([PSASimulator.jl](https://github.com/xyin-anl/PSASimulator.jl)) with Python-based optimization (Pyomo + GLPK).
 
-The simulation core is adapted from the original implementation.
-Additional modules for optimization and surrogate modeling were developed as part of CHBE 6746 (Data Driven PSE).
+Developed as part of CHBE 6746 (Data-Driven PSE).
 
 ---
 
-### PSA Pyomo package layout
+## Project Structure
 
-```text
-psa_pyomo
+```
+PSA_project/
+├── psa_pyomo/                     # Python optimization framework
+│   ├── run.py                     # CLI entry point (multi-start optimization)
+│   ├── model/
+│   │   └── column_model.py        # Decision variables & bounds
+│   ├── process/
+│   │   ├── cycle_model.py         # Julia subprocess bridge + JSONL cache
+│   │   └── css_constraints.py     # Constraint residuals
+│   └── optimization/
+│       └── optimize_psa.py        # Trust-region SLP optimizer
 │
-├── model
-│   ├── column_model.py
-│   ├── isotherm.py
-│   ├── kinetics.py
+├── scripts/
+│   ├── evaluate_psa_point.jl      # Single-point PSA simulation (Julia)
+│   └── multistage_datagen.jl      # Multi-stage dataset generation (Sobol)
 │
-├── process
-│   ├── cycle_model.py
-│   ├── css_constraints.py
+├── PSASimulator_local/            # Local fork of PSASimulator.jl (y0 configurable)
 │
-├── performance
-│   ├── purity.py
-│   ├── recovery.py
-│   ├── productivity.py
+├── data/                          # Generated datasets (CSV)
+│   ├── dataset_material{8,13,16}.csv           # Single-stage (2000 samples each)
+│   ├── dataset_material{8,13,16}_2stage.csv    # 2-stage
+│   └── dataset_material{8,13,16}_3stage.csv    # 3-stage
 │
-├── optimization
-│   ├── optimize_psa.py
-│
-└── run.py
+├── psa_pyomo/psa_run.ipynb        # Results notebook
+└── logs/                          # Optimization iteration logs
 ```
 
-### Added physical/optimization features
+## How It Works
 
-- **Real adsorption physics helpers**
-  - Dual-site Langmuir (`model/isotherm.py`)
-  - LDF kinetics (`model/kinetics.py`)
-- **Binary gas system** in Python backend (`CO2/N2` loading + gas composition updates)
-- **Spatial column model** using **z-grid** (`n_grid`)
-- **Pressure drop (Ergun)** approximation in each step update
-- **Cycle step implementation**: adsorption, blowdown, purge, pressurization
-- **CSS constraint** using cycle-to-cycle state distance (`css_error`)
-- **Persistent simulation cache** on disk (`.jsonl`)
-- **Iteration logging** during optimization (`.csv`)
+```
+Python (Pyomo + GLPK)              Julia (PSASimulator)
+┌──────────────────────┐           ┌──────────────────────┐
+│ Trust-region SLP      │──subprocess──│ 6-step PSA cycle     │
+│ optimizer             │←──stdout────│ QNDF stiff ODE solver│
+│                       │           │ Dual-site Langmuir    │
+│ 1. FD gradients       │           │                       │
+│ 2. LP subproblem      │           │ Returns:              │
+│ 3. Accept/reject      │           │ productivity, energy, │
+│ 4. Update trust-region│           │ purity, recovery      │
+└──────────────────────┘           └──────────────────────┘
+       + JSONL cache (avoids redundant simulations)
+```
 
----
+## Setup
 
-### Core equations
+### Julia
+```bash
+julia --project=. -e 'using Pkg; Pkg.instantiate()'
+```
 
-Objective (default behavior: maximize productivity):
+### Python
+```bash
+conda activate pyomo_env
+pip install pyomo
+# GLPK solver required
+```
 
-$$
-\max J(x) = productivity(x) - w \cdot energy(x)
-$$
+## Usage
 
-(`w = 0` by default.)
+### Run Optimization
+```bash
+python -m psa_pyomo.run \
+  --mat-index 13 \
+  --N 10 \
+  --purity-min 0.25 \
+  --recovery-min 0.50 \
+  --max-iter 20 \
+  --solver glpk
+```
+
+### Generate Dataset
+```bash
+# Single-stage, material 13
+julia --project=. scripts/multistage_datagen.jl 13 1
+
+# 3-stage, material 8
+julia --project=. scripts/multistage_datagen.jl 8 3
+```
+
+### Single-Point Simulation
+```bash
+julia --project=. scripts/evaluate_psa_point.jl \
+  13 10 1.0 200000 1.0 200 0.25 0.25 50000 5000 false 0.15
+# Output: productivity,energy,purity,recovery
+```
+
+## Decision Variables
+
+| Variable | Symbol | Unit | Description |
+|----------|--------|------|-------------|
+| Column length | L | m | Fixed at 1.0 |
+| Feed pressure | P0 | Pa | Pressure during adsorption |
+| Feed flow rate | ndot | mol/(m2 s) | Molar flux |
+| Adsorption time | tads | s | Duration of adsorption step |
+| Pressure equalization | alpha | - | Depressurization fraction |
+| Purge parameter | beta | - | Light product purge fraction |
+| Intermediate pressure | PI | Pa | Pressure after equalization |
+| Low pressure | Pl | Pa | Vacuum pressure during blowdown |
+
+## Optimization Formulation
+
+Objective (maximize productivity):
+
+$$\max\ J(x) = \text{productivity}(x) - w \cdot \text{energy}(x)$$
 
 Constraints:
 
-$$
-purity \ge purity_{min},\quad recovery \ge recovery_{min},\quad css\_error \le css_{tol}
-$$
+$$\text{purity}(x) \geq \text{purity}_{\min}, \quad \text{recovery}(x) \geq \text{recovery}_{\min}$$
 
-$$
-P_I \le P_0,\quad P_l \le P_I
-$$
+$$P_I \leq P_0, \quad P_l \leq P_I$$
 
-Dual-site Langmuir helper:
+Trust-region LP subproblem at each iteration:
 
-$$
-q^* =
-\frac{q_{sat,1} b_1 p}{1 + b_1 p}
-+
-\frac{q_{sat,2} b_2 p}{1 + b_2 p}
-$$
+$$\max\ \hat{J}(x) = J(x_k) + \nabla J(x_k)^T(x - x_k) \quad \text{s.t.} \quad \|x - x_k\|_\infty \leq \Delta$$
 
-LDF kinetics helper:
+## Datasets
 
-$$
-\frac{dq}{dt} = k_{ldf}(q^* - q)
-$$
+9 datasets generated with 2000 Sobol quasi-random samples each:
 
----
+| Material | 1-stage | 2-stage | 3-stage | Best 3-stage purity |
+|----------|---------|---------|---------|---------------------|
+| 8 | 2000 | 2000 | 2000 | 96.7% |
+| 13 | 2000 | 2000 | 2000 | 97.7% |
+| 16 | 2000 | 2000 | 2000 | 62.6% |
 
-### Backends
+Multi-stage PSA cascades each stage's heavy product as the next stage's feed (y0).
 
-- `--backend python` (default): run implemented Python column/cycle physics.
-- `--backend julia`: evaluate points through `scripts/evaluate_psa_point.jl` and `PSASimulator`.
-
-A Julia bridge script is used for single-point simulator evaluation:
-
-- `scripts/evaluate_psa_point.jl`
-
-Compatibility entry-point:
-
-- `pyomo_psa_optimization.py` (calls `psa_pyomo.run:main`)
-
----
-
-### Equations currently implemented
-
-#### Optimization objective
-
-$$
-\max J(x) = productivity(x) - w \cdot energy(x)
-$$
-
-#### Performance constraints
-
-$$
-purity(x) \ge purity_{min},\quad recovery(x) \ge recovery_{min}
-$$
-
-Residual form used in code:
-
-$$
-g_1(x) = purity_{min} - purity(x) \le 0,\quad
-g_2(x) = recovery_{min} - recovery(x) \le 0
-$$
-
-#### Pressure-ordering constraints
-
-$$
-P_I \le P_0,\quad P_l \le P_I
-$$
-
-Residual form:
-
-$$
-g_3(x) = P_I - P_0 \le 0,\quad
-g_4(x) = P_l - P_I \le 0
-$$
-
-#### Trust-region LP subproblem
-
-At each iteration around current point \(x_k\):
-
-$$
-\max \hat{J}(x) = J(x_k) + \nabla J(x_k)^T (x - x_k)
-$$
-
-subject to
-
-$$
-\hat{g}_i(x) = g_i(x_k) + \nabla g_i(x_k)^T (x - x_k) \le 0
-\quad (i = 1,2)
-$$
-
-$$
-\|x - x_k\|_1 \le \Delta
-$$
-
-and direct linear pressure-ordering constraints for `P_I`, `P_0`, and `P_l`.
-
-#### Kinetics/isotherm formulas exposed in Python modules
-
-- Dual-site Langmuir (helper in `model/isotherm.py`):
-
-$$
-q^* =
-\frac{q_{sat,1} b_1 p}{1 + b_1 p}
-+
-\frac{q_{sat,2} b_2 p}{1 + b_2 p}
-$$
-
-- LDF kinetics (helper in `model/kinetics.py`):
-
-$$
-\frac{dq}{dt} = k_{ldf}(q^* - q)
-$$
-
-> Full cycle physics (mass/momentum/energy dynamics and step transitions) are still evaluated by `PSASimulator` through the Julia bridge, while Pyomo handles the optimization subproblems.
-
----
-
-### Requirements
-
-```bash
-pip install pyomo
+### CSV Columns (3-stage example)
 ```
-Install a Pyomo-supported LP solver (for example `glpk`).
-
-If you use `--backend julia`, install Julia and project dependencies as well.
-
----
-
-### Run example
-
-```bash
-python -m psa_pyomo.run \
-  --backend python \
-  --solver glpk \
-  --purity-min 0.90 \
-  --recovery-min 0.75 \
-  --css-tol 1e-4 \
-  --energy-weight 0.0 \
-  --cache-path .psa_pyomo_cache.jsonl \
-  --iter-log-path logs/optimization_iterations.csv
+Inputs:    P0, ndot, tads, alpha, beta, PI, Pl
+Stage 1:   purity_s1, recovery_s1, productivity_s1, energy_s1
+Stage 2:   purity_s2, recovery_s2, productivity_s2, energy_s2
+Stage 3:   purity_s3, recovery_s3, productivity_s3, energy_s3
+Summary:   final_purity, final_recovery, overall_recovery
 ```
+
+## Acknowledgment
+
+Based on the [PSASimulator.jl](https://github.com/xyin-anl/PSASimulator.jl) framework. The simulation core is adapted from the original implementation. Optimization and data generation modules were developed for CHBE 6746 (Data-Driven PSE).
