@@ -39,12 +39,13 @@ class CycleSimulator:
         self._cache_file = (self.project_dir / self.config.cache_path).resolve()
         self._load_persistent_cache()
 
-    def evaluate(self, point: Dict[str, float]) -> CycleEvaluation:
-        key = tuple(round(point[name], 10) for name in VARIABLE_ORDER)
+    def evaluate(self, point: Dict[str, float], feed_y0: float | None = None) -> CycleEvaluation:
+        y0 = self.config.feed_y0 if feed_y0 is None else float(feed_y0)
+        key = tuple(round(point[name], 10) for name in VARIABLE_ORDER) + (round(y0, 10),)
         if key in self._cache:
             return self._cache[key]
 
-        evaluation = self._evaluate_with_julia(point)
+        evaluation = self._evaluate_with_julia(point, y0)
 
         self._cache[key] = evaluation
         self._append_cache_entry(key, evaluation)
@@ -59,6 +60,9 @@ class CycleSimulator:
                     continue
                 rec = json.loads(line)
                 key = tuple(rec["key"])
+                # Backward compat: legacy 8-tuple keys (no feed_y0 suffix) → assume default y0
+                if len(key) == len(VARIABLE_ORDER):
+                    key = key + (round(self.config.feed_y0, 10),)
                 self._cache[key] = CycleEvaluation(
                     productivity=float(rec["productivity"]),
                     energy=float(rec["energy"]),
@@ -83,7 +87,7 @@ class CycleSimulator:
         with self._cache_file.open("a", encoding="utf-8") as fp:
             fp.write(json.dumps(record) + "\n")
 
-    def _evaluate_with_julia(self, point: Dict[str, float]) -> CycleEvaluation:
+    def _evaluate_with_julia(self, point: Dict[str, float], feed_y0: float) -> CycleEvaluation:
         cmd = [
             "julia",
             "--project=.",
@@ -92,7 +96,7 @@ class CycleSimulator:
             str(self.config.n_grid),
             *(str(point[name]) for name in VARIABLE_ORDER),
             "false",
-            str(self.config.feed_y0),
+            str(feed_y0),
         ]
         proc = subprocess.run(cmd, cwd=self.project_dir, capture_output=True, text=True, check=False)
         if proc.returncode != 0:
